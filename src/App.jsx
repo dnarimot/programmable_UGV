@@ -4,10 +4,11 @@ import "./index.css";
 import "./App.css";
 import { Navbar } from "./components/NavBar";
 import { MobileMenu } from "./components/MobileMenu";
-import { Home } from "./pages/home";
-import { Connect } from "./pages/connect";
-import { LearnMore } from "./pages/learnmore";
-import { Contact } from "./pages/Contact";
+import { Home } from "./pages/home/Home";
+import { Connect } from "./pages/home/connect";
+import { LearnMore } from "./pages/home/LearnMore";
+import { Contact } from "./pages/home/Contact";
+import Test from "./pages/home/Test";
 import { HashRouter as Router, Routes, Route } from "react-router-dom";
 
 function App() {
@@ -29,6 +30,7 @@ function App() {
             <Route path="/home" element={<Home />}/>
             <Route path="/connect" element={<Connect />} />
             <Route path="/learnmore" element={<LearnMore />} />
+            <Route path="/test" element={<Test />} />
             <Route path="/contact" element={<Contact />} />
           </Routes>
         </Router>

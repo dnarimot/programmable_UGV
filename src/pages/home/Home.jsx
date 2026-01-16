@@ -1,4 +1,4 @@
-import { RevealOnScroll } from "../components/RevealOnScroll";
+import { RevealOnScroll } from "../../components/RevealOnScroll";
 import { useNavigate } from "react-router-dom";
 
 export const Home = () => {
