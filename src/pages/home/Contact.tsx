@@ -1,17 +1,26 @@
-import { useState } from "react";
+import { useState, ChangeEvent, FormEvent } from "react";
+
+interface ContactFormData {
+  name: string;
+  email: string;
+  message: string;
+}
 
 export const Contact = () => {
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<ContactFormData>({
     name: "",
     email: "",
     message: "",
   });
 
-  const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+  const handleChange = (
+    e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+  ) => {
+    const { name, value } = e.target;
+    setFormData({ ...formData, [name]: value });
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     console.log("Form submitted:", formData);
     // TODO: integrate with backend or email API
@@ -27,8 +36,8 @@ export const Contact = () => {
       </h1>
 
       <p className="text-gray-400 max-w-2xl text-center mb-12">
-        Have questions, collaboration ideas, or technical feedback?  
-        We'd love to hear from you. Fill out the form below or reach out
+        Have questions, collaboration ideas, or technical feedback?
+        We&apos;d love to hear from you. Fill out the form below or reach out
         through our listed channels.
       </p>
 
@@ -71,7 +80,7 @@ export const Contact = () => {
             onChange={handleChange}
             required
             placeholder="Type your message..."
-            rows="5"
+            rows={5}
             className="w-full p-3 rounded bg-gray-800 border border-gray-700 text-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
           />
         </div>
