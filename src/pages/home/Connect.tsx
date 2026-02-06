@@ -28,11 +28,13 @@ interface NavConfig {
   headingTolerance: number;
 }
 
+type GainMode = "manual" | "fast_attack" | "slow_attack" | "hybrid";
+
 interface SDRConfig {
   frequency: number;
   bandwidth: number;
   sampleRate: number;
-  gainMode: "auto" | "manual";
+  gainMode: GainMode;
   gainValue: number;
   direction: "rx" | "tx";
   channel: string;
@@ -75,10 +77,24 @@ const DEFAULT_SDR: SDRConfig = {
   frequency: 2400,
   bandwidth: 5,
   sampleRate: 5,
-  gainMode: "auto",
+  gainMode: "slow_attack", //
   gainValue: 40,
   direction: "rx",
   channel: "A",
+};
+
+const GAIN_MODE_OPTIONS: { label: string; value: GainMode }[] = [
+  { label: "Manual (Fixed Gain)", value: "manual" },
+  { label: "Fast Attack (AGC)", value: "fast_attack" },
+  { label: "Slow Attack (AGC – LoRa)", value: "slow_attack" },
+  { label: "Hybrid (Fast Attack + Slow Decay)", value: "hybrid" },
+];
+
+const GAIN_MODE_LABELS: Record<GainMode, string> = {
+  manual: "Manual",
+  fast_attack: "Fast Attack",
+  slow_attack: "Slow Attack",
+  hybrid: "Hybrid",
 };
 
 const GRID_CENTER = { row: 4, col: 4 }; // center of 10x10 grid
@@ -135,6 +151,8 @@ const decodeNavConfig = (raw: unknown): NavConfig => {
     headingTolerance: r.headingTolerance ?? DEFAULT_NAV.headingTolerance,
   };
 };
+const isValidGainMode = (v: any): v is GainMode =>
+  ["manual", "fast_attack", "slow_attack", "hybrid"].includes(v);
 
 const decodeSDRConfig = (raw: unknown): SDRConfig => {
   if (!raw || typeof raw !== "object") return { ...DEFAULT_SDR };
@@ -143,7 +161,8 @@ const decodeSDRConfig = (raw: unknown): SDRConfig => {
     frequency: r.frequency ?? DEFAULT_SDR.frequency,
     bandwidth: r.bandwidth ?? DEFAULT_SDR.bandwidth,
     sampleRate: r.sampleRate ?? DEFAULT_SDR.sampleRate,
-    gainMode: r.gainMode ?? DEFAULT_SDR.gainMode,
+    gainMode: isValidGainMode(r.gainMode) ? r.gainMode : DEFAULT_SDR.gainMode,
+
     gainValue: r.gainValue ?? DEFAULT_SDR.gainValue,
     direction: r.direction ?? DEFAULT_SDR.direction,
     channel: r.channel ?? DEFAULT_SDR.channel,
@@ -152,6 +171,9 @@ const decodeSDRConfig = (raw: unknown): SDRConfig => {
 
 /* ───────────────── Component ───────────────── */
 export const Connect = () => {
+  const [sdrStatus, setSdrStatus] = useState<any | null>(null);
+  const [sdrStatusError, setSdrStatusError] = useState<string | null>(null);
+
   const toggleWaypoint = (row: number, col: number) => {
     // Don't allow waypoint on robot
     if (row === GRID_CENTER.row && col === GRID_CENTER.col) return;
@@ -298,6 +320,66 @@ export const Connect = () => {
       });
     } catch (err) {
       console.error("Force stop failed", err);
+    }
+  };
+
+  const applySDRConfig = async () => {
+    if (active.connection !== "connected") return;
+
+    try {
+      const res = await fetch(
+        `http://${active.ip}:${active.port}/rovers/${active.id}/sdr/config`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            uri: "ip:192.168.2.1",
+            frequency: active.sdr.frequency,
+            bandwidth: active.sdr.bandwidth,
+            sampleRate: active.sdr.sampleRate,
+            gainMode: active.sdr.gainMode,
+            gainValue: active.sdr.gainValue,
+            direction: active.sdr.direction,
+          }),
+        },
+      );
+
+      if (!res.ok) throw new Error();
+
+      setStatusMsg("SDR configuration applied");
+
+      verifySDR();
+    } catch (err) {
+      console.error(err);
+      setStatusMsg("Failed to apply SDR config");
+    }
+  };
+
+  const verifySDR = async () => {
+    if (active.connection !== "connected") return;
+
+    try {
+      setSdrStatusError(null);
+
+      const res = await fetch(
+        `http://${active.ip}:${active.port}/rovers/${active.id}/sdr/verify`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            uri: "ip:192.168.2.1",
+          }),
+        },
+      );
+
+      if (!res.ok) throw new Error("Verify failed");
+
+      const data = await res.json();
+      setSdrStatus(data);
+    } catch (err) {
+      console.error(err);
+      setSdrStatus(null);
+      setSdrStatusError("Failed to read SDR state");
     }
   };
 
@@ -799,27 +881,31 @@ export const Connect = () => {
             <select
               value={active.sdr.gainMode}
               onChange={(e) =>
-                updateSDR({ gainMode: e.target.value as "auto" | "manual" })
+                updateSDR({ gainMode: e.target.value as GainMode })
               }
               className="w-full bg-zinc-800 rounded px-2 py-1"
             >
-              <option value="auto">Auto</option>
-              <option value="manual">Manual</option>
+              {GAIN_MODE_OPTIONS.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
             </select>
 
-            {active.sdr.gainMode === "manual" && (
-              <>
-                <label className="text-xs text-gray-400">Gain (dB)</label>
-                <input
-                  type="number"
-                  value={active.sdr.gainValue}
-                  onChange={(e) =>
-                    updateSDR({ gainValue: Number(e.target.value) })
-                  }
-                  className="w-full bg-zinc-800 rounded px-2 py-1"
-                />
-              </>
-            )}
+            {active.sdr.direction === "rx" &&
+              active.sdr.gainMode === "manual" && (
+                <>
+                  <label className="text-xs text-gray-400">Gain (dB)</label>
+                  <input
+                    type="number"
+                    value={active.sdr.gainValue}
+                    onChange={(e) =>
+                      updateSDR({ gainValue: Number(e.target.value) })
+                    }
+                    className="w-full bg-zinc-800 rounded px-2 py-1"
+                  />
+                </>
+              )}
 
             <label className="text-xs text-gray-400">Direction</label>
             <select
@@ -839,6 +925,39 @@ export const Connect = () => {
               onChange={(e) => updateSDR({ channel: e.target.value })}
               className="w-full bg-zinc-800 rounded px-2 py-1"
             />
+
+            <button
+              onClick={applySDRConfig}
+              disabled={active.connection !== "connected"}
+              className="w-full mt-3 py-2 rounded text-sm font-medium
+             bg-pink-500 hover:bg-pink-400
+             disabled:bg-zinc-700 disabled:text-gray-500"
+            >
+              Apply SDR Settings
+            </button>
+
+            {sdrStatus && (
+              <div className="mt-3 text-xs text-gray-300 space-y-1">
+                <div className="font-semibold text-pink-300">
+                  SDR Status (Live)
+                </div>
+
+                <div>
+                  RX: {(sdrStatus.rx.frequency_hz / 1e6).toFixed(1)} MHz ·{" "}
+                  {(sdrStatus.rx.sample_rate_hz / 1e6).toFixed(1)} MS/s ·{" "}
+                  {GAIN_MODE_LABELS[sdrStatus.rx.gain_mode as GainMode]}
+                </div>
+
+                <div>
+                  TX: {(sdrStatus.tx.frequency_hz / 1e6).toFixed(1)} MHz ·{" "}
+                  {(sdrStatus.tx.sample_rate_hz / 1e6).toFixed(1)} MS/s
+                </div>
+              </div>
+            )}
+
+            {sdrStatusError && (
+              <div className="mt-2 text-xs text-rose-400">{sdrStatusError}</div>
+            )}
           </div>
         </div>
       </div>
