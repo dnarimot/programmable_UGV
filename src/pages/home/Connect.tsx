@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabaseClient";
+
 import {
   createRover,
   deleteRover,
@@ -31,13 +32,15 @@ interface NavConfig {
 type GainMode = "manual" | "fast_attack" | "slow_attack" | "hybrid";
 
 interface SDRConfig {
-  frequency: number;
-  bandwidth: number;
-  sampleRate: number;
-  gainMode: GainMode;
-  gainValue: number;
+  // Units expected by backend: MHz (per your SDRConfig BaseModel comments)
+  frequency: number; // MHz
+  bandwidth: number; // MHz
+  sampleRate: number; // MS/s (MHz)
   direction: "rx" | "tx";
-  channel: string;
+
+  // RX-only (gainMode is only meaningful for RX)
+  gainMode: GainMode;
+  gainValue: number; // dB (used if RX manual OR if you decide to apply TX gain too)
 }
 
 interface NavTestState {
@@ -76,11 +79,10 @@ const DEFAULT_NAV: NavConfig = {
 const DEFAULT_SDR: SDRConfig = {
   frequency: 2400,
   bandwidth: 5,
-  sampleRate: 5,
-  gainMode: "slow_attack", //
+  sampleRate: 4, // enforce min = 4
+  gainMode: "slow_attack",
   gainValue: 40,
   direction: "rx",
-  channel: "A",
 };
 
 const GAIN_MODE_OPTIONS: { label: string; value: GainMode }[] = [
@@ -154,18 +156,28 @@ const decodeNavConfig = (raw: unknown): NavConfig => {
 const isValidGainMode = (v: any): v is GainMode =>
   ["manual", "fast_attack", "slow_attack", "hybrid"].includes(v);
 
+const clamp = (n: number, min: number, max?: number) => {
+  if (Number.isNaN(n)) return min;
+  if (typeof max === "number") return Math.min(Math.max(n, min), max);
+  return Math.max(n, min);
+};
+
 const decodeSDRConfig = (raw: unknown): SDRConfig => {
   if (!raw || typeof raw !== "object") return { ...DEFAULT_SDR };
   const r = raw as any;
-  return {
-    frequency: r.frequency ?? DEFAULT_SDR.frequency,
-    bandwidth: r.bandwidth ?? DEFAULT_SDR.bandwidth,
-    sampleRate: r.sampleRate ?? DEFAULT_SDR.sampleRate,
-    gainMode: isValidGainMode(r.gainMode) ? r.gainMode : DEFAULT_SDR.gainMode,
 
-    gainValue: r.gainValue ?? DEFAULT_SDR.gainValue,
-    direction: r.direction ?? DEFAULT_SDR.direction,
-    channel: r.channel ?? DEFAULT_SDR.channel,
+  const gainMode: GainMode = isValidGainMode(r.gainMode)
+    ? r.gainMode
+    : DEFAULT_SDR.gainMode;
+
+  return {
+    frequency: Number(r.frequency ?? DEFAULT_SDR.frequency),
+    bandwidth: Number(r.bandwidth ?? DEFAULT_SDR.bandwidth),
+    // ensure sampleRate never drops below 4
+    sampleRate: clamp(Number(r.sampleRate ?? DEFAULT_SDR.sampleRate), 4),
+    direction: r.direction === "tx" ? "tx" : "rx",
+    gainMode,
+    gainValue: Number(r.gainValue ?? DEFAULT_SDR.gainValue),
   };
 };
 
@@ -222,6 +234,69 @@ export const Connect = () => {
     () => instances.find((i) => i.id === activeId)!,
     [instances, activeId],
   );
+
+  // NOTE: This talks to the rover’s FastAPI server (active.ip:active.port).
+  // Backend must have these endpoints:
+  //   POST /sdr/connect  { rover_id, uri }
+  //   POST /sdr/config   { rover_id, uri, frequency, bandwidth, sampleRate, gainMode, gainValue, direction }
+  //   GET  /sdr/status/{rover_id}
+  //
+  // If your backend names differ, update paths/payload keys here (not in UI controls).
+  const sdrBase = () => `http://${active.ip}:${active.port}`;
+
+  // Pluto URI is local to each rover (the Pi sees its own Pluto at ip:192.168.2.1).
+  // No need to expose this as a UI input.
+  const DEFAULT_PLUTO_URI = "ip:192.168.2.1";
+
+  async function sdrConnect(roverId: string) {
+    const res = await fetch(`${sdrBase()}/sdr/connect`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rover_id: roverId, uri: DEFAULT_PLUTO_URI }),
+    });
+    if (!res.ok) throw new Error("SDR connect failed");
+    return res.json();
+  }
+
+  async function sdrConfigure(roverId: string) {
+    // ✅ clamp in case user types < 4
+    const sampleRate = Math.max(4, Number(active.sdr.sampleRate || 0));
+
+    const payload: any = {
+      rover_id: roverId,
+      uri: DEFAULT_PLUTO_URI,
+      frequency: Number(active.sdr.frequency),
+      bandwidth: Number(active.sdr.bandwidth),
+      sample_rate: sampleRate,
+      direction: active.sdr.direction,
+    };
+
+    if (active.sdr.direction === "rx") {
+      payload.gain_mode = active.sdr.gainMode;
+      payload.gain = Number(active.sdr.gainValue);
+    }
+
+    if (active.sdr.direction === "tx") {
+      payload.gain = Number(active.sdr.gainValue);
+    }
+
+    // If your backend also wants TX gain, uncomment:
+    // if (active.sdr.direction === "tx") payload.gainValue = Number(active.sdr.gainValue);
+
+    const res = await fetch(`${sdrBase()}/sdr/config`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error("SDR config failed");
+    return res.json();
+  }
+
+  async function fetchSdrStatus(roverId: string) {
+    const res = await fetch(`${sdrBase()}/sdr/status/${roverId}`);
+    if (!res.ok) throw new Error("SDR status failed");
+    return res.json();
+  }
 
   const ipValid = isValidIPv4(active.ip);
   const portValid = isValidPort(active.port);
@@ -323,66 +398,6 @@ export const Connect = () => {
     }
   };
 
-  const applySDRConfig = async () => {
-    if (active.connection !== "connected") return;
-
-    try {
-      const res = await fetch(
-        `http://${active.ip}:${active.port}/rovers/${active.id}/sdr/config`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            uri: "ip:192.168.2.1",
-            frequency: active.sdr.frequency,
-            bandwidth: active.sdr.bandwidth,
-            sampleRate: active.sdr.sampleRate,
-            gainMode: active.sdr.gainMode,
-            gainValue: active.sdr.gainValue,
-            direction: active.sdr.direction,
-          }),
-        },
-      );
-
-      if (!res.ok) throw new Error();
-
-      setStatusMsg("SDR configuration applied");
-
-      verifySDR();
-    } catch (err) {
-      console.error(err);
-      setStatusMsg("Failed to apply SDR config");
-    }
-  };
-
-  const verifySDR = async () => {
-    if (active.connection !== "connected") return;
-
-    try {
-      setSdrStatusError(null);
-
-      const res = await fetch(
-        `http://${active.ip}:${active.port}/rovers/${active.id}/sdr/verify`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            uri: "ip:192.168.2.1",
-          }),
-        },
-      );
-
-      if (!res.ok) throw new Error("Verify failed");
-
-      const data = await res.json();
-      setSdrStatus(data);
-    } catch (err) {
-      console.error(err);
-      setSdrStatus(null);
-      setSdrStatusError("Failed to read SDR state");
-    }
-  };
-
   async function handleWaypointUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -396,6 +411,47 @@ export const Connect = () => {
       setStatusMsg("Invalid CSV format");
     }
   }
+
+  const handleApplySDR = async () => {
+    if (active.connection !== "connected") return;
+
+    try {
+      setStatusMsg("Connecting SDR…");
+      await sdrConnect(active.id); // ✅ per-rover SDR instance
+
+      setStatusMsg("Applying SDR settings…");
+      await sdrConfigure(active.id);
+
+      setStatusMsg("Reading SDR status…");
+      const status = await fetchSdrStatus(active.id);
+
+      setSdrStatus(status);
+      setSdrStatusError(null);
+      setStatusMsg("SDR configured ✅");
+    } catch (err) {
+      console.error(err);
+      setSdrStatus(null);
+      setSdrStatusError("Failed to configure SDR");
+      setStatusMsg("SDR configuration failed");
+    }
+  };
+
+  const handleVerifySDR = async () => {
+    if (active.connection !== "connected") return;
+
+    try {
+      setStatusMsg("Reading SDR status…");
+      const status = await fetchSdrStatus(active.id);
+      setSdrStatus(status);
+      setSdrStatusError(null);
+      setStatusMsg("SDR status updated");
+    } catch (err) {
+      console.error(err);
+      setSdrStatus(null);
+      setSdrStatusError("Failed to read SDR state");
+      setStatusMsg("Failed to read SDR status");
+    }
+  };
 
   /* ───────────────── Save Config (CREATE or UPDATE) ───────────────── */
   async function saveActiveProfile() {
@@ -867,35 +923,29 @@ export const Connect = () => {
               className="w-full bg-zinc-800 rounded px-2 py-1"
             />
 
-            <label className="text-xs text-gray-400">Sample Rate (MS/s)</label>
-            <input
-              type="number"
-              value={active.sdr.sampleRate}
-              onChange={(e) =>
-                updateSDR({ sampleRate: Number(e.target.value) })
-              }
-              className="w-full bg-zinc-800 rounded px-2 py-1"
-            />
-
-            <label className="text-xs text-gray-400">Gain Mode</label>
-            <select
-              value={active.sdr.gainMode}
-              onChange={(e) =>
-                updateSDR({ gainMode: e.target.value as GainMode })
-              }
-              className="w-full bg-zinc-800 rounded px-2 py-1"
-            >
-              {GAIN_MODE_OPTIONS.map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
+            {active.sdr.direction === "rx" && (
+              <>
+                <label className="text-xs text-gray-400">Gain Mode</label>
+                <select
+                  value={active.sdr.gainMode}
+                  onChange={(e) =>
+                    updateSDR({ gainMode: e.target.value as GainMode })
+                  }
+                  className="w-full bg-zinc-800 rounded px-2 py-1"
+                >
+                  {GAIN_MODE_OPTIONS.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
 
             {active.sdr.direction === "rx" &&
               active.sdr.gainMode === "manual" && (
                 <>
-                  <label className="text-xs text-gray-400">Gain (dB)</label>
+                  <label className="text-xs text-gray-400">RX Gain (dB)</label>
                   <input
                     type="number"
                     value={active.sdr.gainValue}
@@ -906,6 +956,25 @@ export const Connect = () => {
                   />
                 </>
               )}
+
+            {active.sdr.direction === "tx" && (
+              <>
+                <label className="text-xs text-gray-400">
+                  TX Gain (dB attenuation)
+                </label>
+                <input
+                  type="number"
+                  value={active.sdr.gainValue}
+                  onChange={(e) =>
+                    updateSDR({ gainValue: Number(e.target.value) })
+                  }
+                  className="w-full bg-zinc-800 rounded px-2 py-1"
+                />
+                <p className="text-[11px] text-gray-500">
+                  0 = max power, negative values reduce transmit power
+                </p>
+              </>
+            )}
 
             <label className="text-xs text-gray-400">Direction</label>
             <select
@@ -919,21 +988,35 @@ export const Connect = () => {
               <option value="tx">Transmit</option>
             </select>
 
-            <label className="text-xs text-gray-400">Channel</label>
+            <label className="text-xs text-gray-400">Sample Rate (MS/s)</label>
             <input
-              value={active.sdr.channel}
-              onChange={(e) => updateSDR({ channel: e.target.value })}
+              type="number"
+              min={4} //UI constraint
+              step={0.5}
+              value={active.sdr.sampleRate}
+              onChange={(e) =>
+                updateSDR({ sampleRate: Math.max(4, Number(e.target.value)) })
+              }
               className="w-full bg-zinc-800 rounded px-2 py-1"
             />
+            <p className="text-[11px] text-gray-500">
+              Minimum supported input on this platform is 4 MS/s.
+            </p>
 
             <button
-              onClick={applySDRConfig}
+              onClick={handleApplySDR}
               disabled={active.connection !== "connected"}
-              className="w-full mt-3 py-2 rounded text-sm font-medium
-             bg-pink-500 hover:bg-pink-400
-             disabled:bg-zinc-700 disabled:text-gray-500"
+              className="w-full mt-2 py-2 rounded text-sm bg-pink-600 hover:bg-pink-500 disabled:bg-zinc-700 disabled:text-gray-500"
             >
               Apply SDR Settings
+            </button>
+
+            <button
+              onClick={handleVerifySDR}
+              disabled={active.connection !== "connected"}
+              className="w-full mt-2 py-2 rounded text-sm border border-pink-500/60 text-pink-300 hover:bg-pink-500/10 disabled:opacity-50"
+            >
+              Verify SDR Status
             </button>
 
             {sdrStatus && (
@@ -942,16 +1025,20 @@ export const Connect = () => {
                   SDR Status (Live)
                 </div>
 
-                <div>
-                  RX: {(sdrStatus.rx.frequency_hz / 1e6).toFixed(1)} MHz ·{" "}
-                  {(sdrStatus.rx.sample_rate_hz / 1e6).toFixed(1)} MS/s ·{" "}
-                  {GAIN_MODE_LABELS[sdrStatus.rx.gain_mode as GainMode]}
-                </div>
+                {sdrStatus.rx && (
+                  <div>
+                    RX: {Number(sdrStatus.rx.frequency) / 1e6} MHz ·{" "}
+                    {Number(sdrStatus.rx.sample_rate) / 1e6} MS/s ·{" "}
+                    {String(sdrStatus.rx.gain_mode)}
+                  </div>
+                )}
 
-                <div>
-                  TX: {(sdrStatus.tx.frequency_hz / 1e6).toFixed(1)} MHz ·{" "}
-                  {(sdrStatus.tx.sample_rate_hz / 1e6).toFixed(1)} MS/s
-                </div>
+                {sdrStatus.tx && (
+                  <div>
+                    TX: {Number(sdrStatus.tx.frequency) / 1e6} MHz ·{" "}
+                    {Number(sdrStatus.tx.sample_rate) / 1e6} MS/s
+                  </div>
+                )}
               </div>
             )}
 
