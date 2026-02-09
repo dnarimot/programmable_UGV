@@ -101,6 +101,15 @@ const GAIN_MODE_LABELS: Record<GainMode, string> = {
 
 const GRID_CENTER = { row: 4, col: 4 }; // center of 10x10 grid
 
+const formatGain = (v: any) => {
+  if (v == null) return "N/A";
+
+  // Handle strings like "71.000000 dB"
+  const n = typeof v === "string" ? parseFloat(v) : Number(v);
+
+  return Number.isFinite(n) ? `${n.toFixed(1)} dB` : "N/A";
+};
+
 /* ───────────────── Utils ───────────────── */
 const isValidIPv4 = (ip: string) =>
   /^(25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)){3}$/.test(
@@ -1020,23 +1029,62 @@ export const Connect = () => {
             </button>
 
             {sdrStatus && (
-              <div className="mt-3 text-xs text-gray-300 space-y-1">
-                <div className="font-semibold text-pink-300">
-                  SDR Status (Live)
+              <div className="mt-3 relative bg-zinc-950 border border-pink-500/30 rounded-lg p-3 text-xs text-gray-200">
+                {/* Close button */}
+                <button
+                  onClick={() => setSdrStatus(null)}
+                  className="absolute top-2 right-2 text-gray-400 hover:text-rose-400"
+                  title="Close"
+                >
+                  ✕
+                </button>
+
+                <div className="font-semibold text-pink-400 mb-2">
+                  SDR Check (Live)
                 </div>
 
+                {/* RX */}
                 {sdrStatus.rx && (
-                  <div>
-                    RX: {Number(sdrStatus.rx.frequency) / 1e6} MHz ·{" "}
-                    {Number(sdrStatus.rx.sample_rate) / 1e6} MS/s ·{" "}
-                    {String(sdrStatus.rx.gain_mode)}
+                  <div className="mb-3">
+                    <div className="text-pink-300 font-medium mb-1">
+                      RX PARAMETERS
+                    </div>
+                    <div>
+                      Frequency:{" "}
+                      {(Number(sdrStatus.rx.frequency) / 1e6).toFixed(3)} MHz
+                    </div>
+                    <div>
+                      Sample Rate:{" "}
+                      {(Number(sdrStatus.rx.sample_rate) / 1e6).toFixed(3)} MS/s
+                    </div>
+                    <div>
+                      Bandwidth:{" "}
+                      {(Number(sdrStatus.rx.bandwidth) / 1e6).toFixed(3)} MHz
+                    </div>
+                    <div>Gain Mode: {String(sdrStatus.rx.gain_mode)}</div>
+                    <div>Gain: {formatGain(sdrStatus.rx.gain)}</div>
                   </div>
                 )}
 
+                {/* TX */}
                 {sdrStatus.tx && (
                   <div>
-                    TX: {Number(sdrStatus.tx.frequency) / 1e6} MHz ·{" "}
-                    {Number(sdrStatus.tx.sample_rate) / 1e6} MS/s
+                    <div className="text-pink-300 font-medium mb-1">
+                      TX PARAMETERS
+                    </div>
+                    <div>
+                      Frequency:{" "}
+                      {(Number(sdrStatus.tx.frequency) / 1e6).toFixed(3)} MHz
+                    </div>
+                    <div>
+                      Sample Rate:{" "}
+                      {(Number(sdrStatus.tx.sample_rate) / 1e6).toFixed(3)} MS/s
+                    </div>
+                    <div>
+                      Bandwidth:{" "}
+                      {(Number(sdrStatus.tx.bandwidth) / 1e6).toFixed(3)} MHz
+                    </div>
+                    <div>Gain: {formatGain(sdrStatus.tx.gain)}</div>
                   </div>
                 )}
               </div>
