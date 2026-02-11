@@ -10,6 +10,8 @@ import {
 } from "../../lib/roverApi";
 import { useRover } from "../../context/RoverContext";
 import RoverSelector from "../../components/RoverSelector";
+import { RxBuffer } from "../../components/RxBuffer";
+import { TxMessage } from "../../components/TxMessage";
 
 /* ───────────────── Types ───────────────── */
 interface GridPosition {
@@ -775,6 +777,22 @@ export const Connect = () => {
             </span>
             <span>Click cells to add/remove nodes</span>
           </div>
+
+          {/* RX Buffer and TX Message moved under the grid (full width of left container) */}
+          <div className="w-full mt-4 px-4 space-y-3">
+            <RxBuffer
+              // TODO: confirm visibility rules with backend team
+              isVisible={active.sdr.direction === "rx"}
+              roverIp={active.ip}
+              roverPort={active.port}
+            />
+
+            <TxMessage
+              isVisible={active.sdr.direction === "tx"}
+              roverIp={active.ip}
+              roverPort={active.port}
+            />
+          </div>
         </div>
 
         {/* Right Rail */}
@@ -1094,6 +1112,8 @@ export const Connect = () => {
               <div className="mt-2 text-xs text-rose-400">{sdrStatusError}</div>
             )}
           </div>
+
+          {/* NOTE: RXBuffer and TxMessage moved to the left grid column to sit under the waypoint grid. */}
         </div>
       </div>
     </section>
