@@ -11,6 +11,7 @@ import { Contact } from "./pages/home/Contact";
 import Test from "./pages/home/Test";
 import { HashRouter as Router, Routes, Route } from "react-router-dom";
 import { Login } from "./pages/auth/Login";
+import NavTest from "./components/NavTest";
 
 function App() {
   const [isLoaded, setIsLoaded] = useState(false);
@@ -34,6 +35,7 @@ function App() {
             <Route path="/test" element={<Test />} />
             <Route path="/contact" element={<Contact />} />
             <Route path="/login" element={<Login />} />
+            <Route path="/navtest" element={<NavTest />} />
           </Routes>
         </Router>
       </div>
