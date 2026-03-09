@@ -123,6 +123,17 @@ const isValidPort = (port: string) => {
   return Number.isInteger(n) && n >= 1 && n <= 65535;
 };
 
+function gridToMeters(
+  row: number,
+  col: number,
+  centerRow: number,
+  centerCol: number,
+): Waypoint {
+  const x = col - centerCol; // East (+) / West (-)
+  const y = centerRow - row; // North (+) / South (-)
+
+  return { x, y };
+}
 /* ───────────────── Decode helpers ───────────────── */
 function parseCSVWaypoints(file: File): Promise<Waypoint[]> {
   return new Promise((resolve, reject) => {
@@ -388,7 +399,38 @@ export const Connect = () => {
       });
     }
   };
+  const runMission = async () => {
+    if (active.connection !== "connected") return;
 
+    // Convert UI grid waypoints to rover coordinates
+    const mission = active.waypoints.map((w) =>
+      gridToMeters(w.row, w.col, GRID_CENTER.row, GRID_CENTER.col),
+    );
+
+    try {
+      const res = await fetch(
+        `http://${active.ip}:${active.port}/nav/mission`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            waypoints: mission,
+            base_speed: active.nav.baseSpeed,
+            turn_speed: active.nav.turnSpeed,
+          }),
+        },
+      );
+
+      if (!res.ok) throw new Error();
+
+      setStatusMsg("Mission started");
+    } catch (err) {
+      console.error(err);
+      setStatusMsg("Mission failed");
+    }
+  };
   const forceStop = async () => {
     if (active.connection !== "connected") return;
 
@@ -912,7 +954,18 @@ export const Connect = () => {
             >
               Force Stop
             </button>
-
+            <button
+              onClick={runMission}
+              disabled={
+                active.connection !== "connected" ||
+                active.waypoints.length === 0
+              }
+              className="w-full mt-2 py-2 rounded text-sm
+  bg-indigo-600 hover:bg-indigo-500
+  disabled:bg-zinc-700 disabled:text-gray-500"
+            >
+              Run Mission
+            </button>
             {active.navTest.lastResult && (
               <p
                 className={`text-xs mt-2 ${
