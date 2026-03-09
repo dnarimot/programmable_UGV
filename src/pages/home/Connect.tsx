@@ -63,7 +63,8 @@ interface RoverUIInstance {
   robotPos: GridPosition;
   waypoints: GridPosition[]; // UI / grid waypoints
 
-  missionWaypoints?: Waypoint[]; // ⬅️ CSV / backend mission points
+  missionWaypoints?: Waypoint[]; //  CSV / backend mission points
+  missionFileName?: string;
 
   nav: NavConfig;
   navTest: NavTestState;
@@ -134,6 +135,18 @@ function gridToMeters(
 
   return { x, y };
 }
+
+function metersToGrid(
+  x: number,
+  y: number,
+  centerRow: number,
+  centerCol: number,
+): GridPosition {
+  const col = Math.round(centerCol + x);
+  const row = Math.round(centerRow - y);
+
+  return { row, col };
+}
 /* ───────────────── Decode helpers ───────────────── */
 function parseCSVWaypoints(file: File): Promise<Waypoint[]> {
   return new Promise((resolve, reject) => {
@@ -141,13 +154,29 @@ function parseCSVWaypoints(file: File): Promise<Waypoint[]> {
 
     reader.onload = () => {
       try {
-        const text = reader.result as string;
-        const lines = text.split("\n").filter(Boolean);
+        let text = reader.result as string;
+
+        console.log("RAW CSV:", JSON.stringify(text));
+
+        text = text.replace(/^\uFEFF/, ""); // remove BOM
+
+        const lines = text
+          .trim()
+          .split(/\r?\n/)
+          .map((l) => l.replace(/"/g, "").trim()) // remove quotes
+          .filter((l) => l.length > 0);
 
         const points: Waypoint[] = lines.map((line, idx) => {
-          const [x, y] = line.split(",").map(Number);
+          const parts = line.split(",");
 
-          if (Number.isNaN(x) || Number.isNaN(y)) {
+          if (parts.length < 2) {
+            throw new Error(`Invalid coordinate format on line ${idx + 1}`);
+          }
+
+          const x = Number(parts[0].trim());
+          const y = Number(parts[1].trim());
+
+          if (!Number.isFinite(x) || !Number.isFinite(y)) {
             throw new Error(`Invalid coordinate on line ${idx + 1}`);
           }
 
@@ -209,7 +238,6 @@ export const Connect = () => {
   const [sdrStatusError, setSdrStatusError] = useState<string | null>(null);
 
   const toggleWaypoint = (row: number, col: number) => {
-    // Don't allow waypoint on robot
     if (row === GRID_CENTER.row && col === GRID_CENTER.col) return;
 
     setInstances((prev) =>
@@ -220,6 +248,7 @@ export const Connect = () => {
 
         return {
           ...i,
+          missionWaypoints: undefined, // disable CSV when grid used
           waypoints: exists
             ? i.waypoints.filter((p) => !(p.row === row && p.col === col))
             : [...i.waypoints, { row, col }],
@@ -227,7 +256,20 @@ export const Connect = () => {
       }),
     );
   };
-
+  function clearWaypoints() {
+    setInstances((prev) =>
+      prev.map((i) =>
+        i.id === activeId
+          ? {
+              ...i,
+              waypoints: [],
+              missionWaypoints: undefined,
+              missionFileName: undefined,
+            }
+          : i,
+      ),
+    );
+  }
   const gridSize = 10;
   const { setActiveRover } = useRover();
 
@@ -399,13 +441,25 @@ export const Connect = () => {
       });
     }
   };
+
   const runMission = async () => {
     if (active.connection !== "connected") return;
 
-    // Convert UI grid waypoints to rover coordinates
-    const mission = active.waypoints.map((w) =>
-      gridToMeters(w.row, w.col, GRID_CENTER.row, GRID_CENTER.col),
-    );
+    let mission: Waypoint[] = [];
+
+    // Prefer CSV if loaded
+    if (active.missionWaypoints && active.missionWaypoints.length > 0) {
+      mission = active.missionWaypoints;
+    } else {
+      mission = active.waypoints.map((w) =>
+        gridToMeters(w.row, w.col, GRID_CENTER.row, GRID_CENTER.col),
+      );
+    }
+
+    if (mission.length === 0) {
+      setStatusMsg("No waypoints defined");
+      return;
+    }
 
     try {
       const res = await fetch(
@@ -431,6 +485,7 @@ export const Connect = () => {
       setStatusMsg("Mission failed");
     }
   };
+
   const forceStop = async () => {
     if (active.connection !== "connected") return;
 
@@ -457,12 +512,20 @@ export const Connect = () => {
 
     try {
       const points = await parseCSVWaypoints(file);
-      updateActive({ missionWaypoints: points });
+
+      updateActive({
+        missionWaypoints: points,
+        missionFileName: file.name,
+        waypoints: [], // disable grid if CSV loaded
+      });
+
       setStatusMsg(`Loaded ${points.length} waypoints`);
     } catch (err) {
       console.error(err);
       setStatusMsg("Invalid CSV format");
     }
+
+    e.target.value = "";
   }
 
   const handleApplySDR = async () => {
@@ -770,9 +833,20 @@ export const Connect = () => {
                   const isRobot =
                     r === GRID_CENTER.row && c === GRID_CENTER.col;
 
-                  const wpIndex = active.waypoints.findIndex(
+                  let wpIndex = active.waypoints.findIndex(
                     (p) => p.row === r && p.col === c,
                   );
+
+                  // show CSV mission nodes
+                  if (wpIndex === -1 && active.missionWaypoints) {
+                    const csvGrid = active.missionWaypoints.map((p) =>
+                      metersToGrid(p.x, p.y, GRID_CENTER.row, GRID_CENTER.col),
+                    );
+
+                    wpIndex = csvGrid.findIndex(
+                      (p) => p.row === r && p.col === c,
+                    );
+                  }
 
                   const isWaypoint = wpIndex !== -1;
 
@@ -820,17 +894,29 @@ export const Connect = () => {
             <span>Click cells to add/remove nodes</span>
           </div>
 
+          <button
+            onClick={clearWaypoints}
+            className="mt-2 px-3 py-1 text-xs rounded bg-rose-500/20 text-rose-400"
+          >
+            Clear All Nodes
+          </button>
+
           {/* RX Buffer and TX Message moved under the grid (full width of left container) */}
           <div className="w-full mt-4 px-4 space-y-3">
             <RxBuffer
-              // TODO: confirm visibility rules with backend team
-              isVisible={active.sdr.direction === "rx"}
+              isVisible={
+                active.connection === "connected" &&
+                active.sdr.direction === "rx"
+              }
               roverIp={active.ip}
               roverPort={active.port}
             />
 
             <TxMessage
-              isVisible={active.sdr.direction === "tx"}
+              isVisible={
+                active.connection === "connected" &&
+                active.sdr.direction === "tx"
+              }
               roverIp={active.ip}
               roverPort={active.port}
             />
@@ -919,8 +1005,23 @@ export const Connect = () => {
             />
 
             {active.missionWaypoints && (
-              <div className="text-xs text-gray-400">
-                Loaded <b>{active.missionWaypoints.length}</b> mission waypoints
+              <div className="flex items-center justify-between text-xs text-gray-400">
+                <span>
+                  <b>{active.missionFileName}</b> (
+                  {active.missionWaypoints.length} points)
+                </span>
+
+                <button
+                  onClick={() =>
+                    updateActive({
+                      missionWaypoints: undefined,
+                      missionFileName: undefined,
+                    })
+                  }
+                  className="text-rose-400 hover:text-rose-300"
+                >
+                  Remove CSV
+                </button>
               </div>
             )}
           </div>
@@ -958,7 +1059,9 @@ export const Connect = () => {
               onClick={runMission}
               disabled={
                 active.connection !== "connected" ||
-                active.waypoints.length === 0
+                (active.waypoints.length === 0 &&
+                  (!active.missionWaypoints ||
+                    active.missionWaypoints.length === 0))
               }
               className="w-full mt-2 py-2 rounded text-sm
   bg-indigo-600 hover:bg-indigo-500
