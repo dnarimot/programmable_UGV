@@ -4,12 +4,14 @@ interface TxMessageProps {
   isVisible: boolean;
   roverIp: string;
   roverPort: string;
+  roverId: string;
 }
 
 export const TxMessage = ({
   isVisible,
   roverIp,
   roverPort,
+  roverId,
 }: TxMessageProps) => {
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,6 +31,12 @@ export const TxMessage = ({
         `http://${roverIp}:${roverPort}/sdr/txgps`,
         {
           method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            rover_id: roverId,
+          }),
         }
       );
 
@@ -60,8 +68,7 @@ export const TxMessage = ({
 
       {lastSentTime && (
         <div className="text-xs text-emerald-400">
-          Last transmission:{" "}
-          {new Date(lastSentTime).toLocaleTimeString()}
+          Last transmission: {new Date(lastSentTime).toLocaleTimeString()}
         </div>
       )}
 

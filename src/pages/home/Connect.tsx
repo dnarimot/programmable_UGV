@@ -84,7 +84,7 @@ const DEFAULT_SDR: SDRConfig = {
   bandwidth: 5,
   sampleRate: 4, // enforce min = 4
   gainMode: "slow_attack",
-  gainValue: 40,
+  gainValue: 0,
   direction: "rx",
 };
 
@@ -910,6 +910,7 @@ export const Connect = () => {
               }
               roverIp={active.ip}
               roverPort={active.port}
+              roverId={active.id}
             />
 
             <TxMessage
@@ -919,6 +920,7 @@ export const Connect = () => {
               }
               roverIp={active.ip}
               roverPort={active.port}
+              roverId={active.id}
             />
           </div>
         </div>

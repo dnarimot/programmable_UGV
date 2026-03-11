@@ -17,9 +17,15 @@ interface RxBufferProps {
   isVisible: boolean;
   roverIp: string;
   roverPort: string;
+  roverId: string;
 }
 
-export const RxBuffer = ({ isVisible, roverIp, roverPort }: RxBufferProps) => {
+export const RxBuffer = ({
+  isVisible,
+  roverIp,
+  roverPort,
+  roverId,
+}: RxBufferProps) => {
   const terminalRef = useRef<HTMLDivElement>(null);
   const [messages, setMessages] = useState<BufferMessage[]>([]);
   const [lastSeq, setLastSeq] = useState(0);
@@ -50,7 +56,7 @@ export const RxBuffer = ({ isVisible, roverIp, roverPort }: RxBufferProps) => {
         //     { messages: [ { seq, data, timestamp, length } ], max_seq }
         //   If your backend uses different keys, update the handler below to map fields.
         const response = await fetch(
-          `http://${roverIp}:${roverPort}/sdr/buffer/rover-1?since_seq=${lastSeq}`
+          `http://${roverIp}:${roverPort}/sdr/buffer/${roverId}?since_seq=${lastSeq}`,
         );
 
         if (!response.ok) {
@@ -146,14 +152,22 @@ export const RxBuffer = ({ isVisible, roverIp, roverPort }: RxBufferProps) => {
           >
             <span className="text-cyan-400">
               [{formatTimestamp(msg.timestamp)}]
-            </span>
-            {" "}
-            <span className="text-cyan-200">[SEQ:{msg.seq}]</span>
-            {" "}
+            </span>{" "}
+            <span className="text-cyan-200">[SEQ:{msg.seq}]</span>{" "}
             <span className="text-cyan-500">[{msg.length}B]</span>
             <br />
             <span className="text-cyan-300">
-              {formatHex(msg.data.toUpperCase())}
+              {(() => {
+                try {
+                  const parsed = JSON.parse(msg.data);
+
+                  if (parsed.type === "gps") {
+                    return `📍 GPS ${parsed.lat.toFixed(6)}, ${parsed.lon.toFixed(6)}`;
+                  }
+                } catch {}
+
+                return formatHex(msg.data);
+              })()}
             </span>
           </div>
         ))}
