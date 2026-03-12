@@ -14,10 +14,10 @@ export default function Test() {
 
       if (!res.ok) throw new Error("Request failed");
 
-      setStatus("Movement test started 🚗");
+      setStatus("Movement test started");
     } catch (err) {
       console.error(err);
-      setStatus("Failed to trigger test ❌");
+      setStatus("Failed to trigger test");
     }
   }
 

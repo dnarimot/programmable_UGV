@@ -2,11 +2,6 @@ import { useEffect, useRef, useState } from "react";
 
 interface BufferMessage {
   seq: number;
-  // TODO: BACKEND PLACEHOLDER - Data encoding
-  // - The backend may return data as a raw string or as hex-encoded bytes.
-  // - Replace this comment and, if needed, update UI decoding logic depending on what the backend returns.
-  //   - If backend returns raw strings: `data` will be the message string and can be displayed directly.
-  //   - If backend returns hex: frontend will need to decode hex to text before displaying (or the backend can decode first).
   data: string;
   timestamp: number;
   direction: "rx" | "tx";
@@ -66,11 +61,6 @@ export const RxBuffer = ({
         const data = await response.json();
 
         if (data.messages && data.messages.length > 0) {
-          // TODO: BACKEND PLACEHOLDER - Response field mapping
-          // - If the backend returns items with different key names (e.g. `seq_num`, `payload`, `ts`), map them here.
-          // - Example mapping if backend returns `{ seq_num, payload, ts }`:
-          //     const mapped = data.messages.map(m => ({ seq: m.seq_num, data: m.payload, timestamp: m.ts, length: m.length }));
-          //     setMessages(prev => [...prev, ...mapped]);
           setMessages((prev) => [...prev, ...data.messages]);
           setLastSeq(data.max_seq);
         }

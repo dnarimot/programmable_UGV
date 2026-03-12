@@ -323,7 +323,7 @@ export const Connect = () => {
   }
 
   async function sdrConfigure(roverId: string) {
-    // ✅ clamp in case user types < 4
+    //clamp in case user types < 4
     const sampleRate = Math.max(4, Number(active.sdr.sampleRate || 0));
 
     const payload: any = {
@@ -533,7 +533,7 @@ export const Connect = () => {
 
     try {
       setStatusMsg("Connecting SDR…");
-      await sdrConnect(active.id); // ✅ per-rover SDR instance
+      await sdrConnect(active.id); // per-rover SDR instance
 
       setStatusMsg("Applying SDR settings…");
       await sdrConfigure(active.id);
@@ -543,7 +543,7 @@ export const Connect = () => {
 
       setSdrStatus(status);
       setSdrStatusError(null);
-      setStatusMsg("SDR configured ✅");
+      setStatusMsg("SDR configured");
     } catch (err) {
       console.error(err);
       setSdrStatus(null);
